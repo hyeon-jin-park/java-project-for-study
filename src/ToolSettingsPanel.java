@@ -1,6 +1,9 @@
 import javax.swing.*;
 import java.awt.*;
+import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import java.awt.event.ActionListener;
+import java.awt.event.ActionEvent;
 
 public class ToolSettingsPanel extends JPanel {
 
@@ -15,7 +18,14 @@ public class ToolSettingsPanel extends JPanel {
         String title = isEraser ? "지우개 설정" : "펜 설정";
         this.setBorder(BorderFactory.createTitledBorder(title));
 
-        // 모양 설정
+        if (isEraser) {
+            setupEraserPanel();
+        } else {
+            setupPenPanel();
+        }
+    }
+
+    private void setupPenPanel() {
         JPanel shapePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         shapePanel.setBorder(BorderFactory.createTitledBorder("모양"));
         JRadioButton roundButton = new JRadioButton("원형", true);
@@ -26,15 +36,13 @@ public class ToolSettingsPanel extends JPanel {
         shapePanel.add(roundButton);
         shapePanel.add(squareButton);
 
-        // 굵기 슬라이더
         JLabel thicknessLabel = new JLabel("굵기");
-        JSlider thicknessSlider = new JSlider(JSlider.HORIZONTAL, 1, 50, isEraser ? 20 : 5);
+        JSlider thicknessSlider = new JSlider(JSlider.HORIZONTAL, 1, 50, 5);
         thicknessSlider.setMajorTickSpacing(10);
         thicknessSlider.setMinorTickSpacing(1);
         thicknessSlider.setPaintTicks(true);
         thicknessSlider.setPaintLabels(true);
 
-        // 투명도 슬라이더
         JLabel opacityLabel = new JLabel("투명도");
         JSlider opacitySlider = new JSlider(JSlider.HORIZONTAL, 0, 255, 255);
         opacitySlider.setMajorTickSpacing(50);
@@ -48,27 +56,42 @@ public class ToolSettingsPanel extends JPanel {
         this.add(opacityLabel);
         this.add(opacitySlider);
 
-        // 리스너 연결
-        ChangeListener sliderListener = e -> {
-            if (isEraser) {
-                canvas.setEraserStrokeWidth(thicknessSlider.getValue());
-                canvas.setEraserOpacity(opacitySlider.getValue());
+        thicknessSlider.addChangeListener(e -> canvas.setPenStrokeWidth(thicknessSlider.getValue()));
+        opacitySlider.addChangeListener(e -> canvas.setPenOpacity(opacitySlider.getValue()));
+
+        roundButton.addActionListener(e -> canvas.setPenStrokeShape(BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        squareButton.addActionListener(e -> canvas.setPenStrokeShape(BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
+    }
+
+    private void setupEraserPanel() {
+        JLabel thicknessLabel = new JLabel("굵기");
+        JSlider thicknessSlider = new JSlider(JSlider.HORIZONTAL, 1, 50, 20);
+        thicknessSlider.setMajorTickSpacing(10);
+        thicknessSlider.setMinorTickSpacing(1);
+        thicknessSlider.setPaintTicks(true);
+        thicknessSlider.setPaintLabels(true);
+
+        JButton eraseModeButton = new JButton("획 지우기");
+        JButton clearAllButton = new JButton("전체 지우기");
+
+        this.add(thicknessLabel);
+        this.add(thicknessSlider);
+        this.add(eraseModeButton);
+        this.add(clearAllButton);
+
+        thicknessSlider.addChangeListener(e -> canvas.getEraserTool().setEraserWidth(thicknessSlider.getValue()));
+        eraseModeButton.addActionListener(e -> {
+            boolean isStrokeMode = canvas.getEraserTool().isStrokeMode();
+            if (isStrokeMode) {
+                // 획 지우기 모드 -> 연속 지우기 모드로 전환
+                canvas.getEraserTool().setStrokeMode(false);
+                eraseModeButton.setText("연속 지우기");
             } else {
-                canvas.setPenStrokeWidth(thicknessSlider.getValue());
-                canvas.setPenOpacity(opacitySlider.getValue());
+                // 연속 지우기 모드 -> 획 지우기 모드로 전환
+                canvas.getEraserTool().setStrokeMode(true);
+                eraseModeButton.setText("획 지우기");
             }
-        };
-        thicknessSlider.addChangeListener(sliderListener);
-        opacitySlider.addChangeListener(sliderListener);
-
-        roundButton.addActionListener(e -> {
-            if (isEraser) { canvas.setEraserStrokeShape(BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND); }
-            else { canvas.setPenStrokeShape(BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND); }
         });
-
-        squareButton.addActionListener(e -> {
-            if (isEraser) { canvas.setEraserStrokeShape(BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER); }
-            else { canvas.setPenStrokeShape(BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER); }
-        });
+        clearAllButton.addActionListener(e -> canvas.getEraserTool().clearAll());
     }
 }

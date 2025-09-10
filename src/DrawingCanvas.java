@@ -3,68 +3,131 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 
 public class DrawingCanvas extends JPanel {
 
-    // 캔버스 변수
-    private BufferedImage canvasImage;
-    private Graphics2D g2d;
-    private int prevX, prevY;
+    public enum ToolMode {
+        PEN, ERASER, SELECT
+    }
 
-    // 색상 변수
-    private Color currentColor = Color.BLACK; // 펜의 기본 색상
-    private boolean isEraserMode = false; // 지우개 모드 상태
+    private ArrayList<ArrayList<DrawingObject>> undoStack = new ArrayList<>();
+    private ArrayList<ArrayList<DrawingObject>> redoStack = new ArrayList<>();
+    private ArrayList<DrawingObject> currentStroke = null;
 
-    // 도구 변수
+    private Point lastPoint = null;
+    private Color penColor = Color.BLACK;
     private int penStrokeWidth = 5;
     private int penOpacity = 255;
     private int penStrokeCap = BasicStroke.CAP_ROUND;
     private int penStrokeJoin = BasicStroke.JOIN_ROUND;
 
-    private int eraserStrokeWidth = 5;
-    private int eraserOpacity = 255;
-    private int eraserStrokeCap = BasicStroke.CAP_ROUND;
-    private int eraserStrokeJoin = BasicStroke.JOIN_ROUND;
+    private SelectionTool selectionTool;
+    private EraserTool eraserTool;
+    private ToolMode currentMode = ToolMode.PEN;
+
+    private BufferedImage offScreenBuffer;
+    private BufferedImage bitmapLayer;
 
     public DrawingCanvas() {
-        canvasImage = new BufferedImage(800, 600, BufferedImage.TYPE_INT_ARGB);
-        g2d = canvasImage.createGraphics();
-        g2d.setColor(Color.WHITE);
-        g2d.fillRect(0, 0, 800, 600);
+        setBackground(Color.WHITE);
+
+        selectionTool = new SelectionTool(this);
+        eraserTool = new EraserTool(this);
 
         addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                prevX = e.getX();
-                prevY = e.getY();
+                if (currentMode == ToolMode.SELECT) {
+                    selectionTool.mousePressed(e);
+                } else if (currentMode == ToolMode.ERASER) {
+                    eraserTool.mousePressed(e);
+                } else if (currentMode == ToolMode.PEN) {
+                    currentStroke = new ArrayList<>();
+                    lastPoint = e.getPoint();
+                }
+            }
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (currentMode == ToolMode.SELECT) {
+                    selectionTool.mouseReleased(e);
+                } else if (currentMode == ToolMode.ERASER) {
+                    // EraserTool이 mousePressed에서 지우므로, 여기서는 할 일이 없습니다.
+                } else if (currentMode == ToolMode.PEN) {
+                    if (currentStroke != null && !currentStroke.isEmpty()) {
+                        undoStack.add(currentStroke);
+                        redoStack.clear();
+                    }
+                    currentStroke = null;
+                    repaint();
+                }
             }
         });
 
         addMouseMotionListener(new MouseAdapter() {
             @Override
             public void mouseDragged(MouseEvent e) {
-                // 현재 도구 상태에 따라 그리기 색상 설정
-                if (isEraserMode) {
-                    g2d.setColor(Color.WHITE); // 지우개 모드일 땐 흰색으로
-                } else {
-                    g2d.setColor(currentColor); // 펜 모드일 땐 현재 펜 색상으로
+                if (currentMode == ToolMode.SELECT) {
+                    selectionTool.mouseDragged(e);
+                } else if (currentMode == ToolMode.ERASER) {
+                    eraserTool.mouseDragged(e);
+                } else if (currentMode == ToolMode.PEN && lastPoint != null) {
+                    Point currentPoint = e.getPoint();
+                    currentStroke.add(new Line(lastPoint, currentPoint, penColor, penStrokeWidth, penStrokeCap, penStrokeJoin));
+                    lastPoint = currentPoint;
+                    repaint();
                 }
-
-                g2d.setStroke(new BasicStroke(5));
-                g2d.drawLine(prevX, prevY, e.getX(), e.getY());
-
-                prevX = e.getX();
-                prevY = e.getY();
-
-                repaint();
+            }
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                eraserTool.mouseMoved(e);
             }
         });
+
+        addMouseListener(eraserTool);
+        addMouseMotionListener(eraserTool);
+    }
+
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        Dimension size = getPreferredSize();
+        offScreenBuffer = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_ARGB);
+        bitmapLayer = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = (Graphics2D) bitmapLayer.getGraphics();
+        g2d.setColor(Color.WHITE);
+        g2d.fillRect(0, 0, size.width, size.height);
+        g2d.dispose();
     }
 
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-        g.drawImage(canvasImage, 0, 0, null);
+        Graphics2D g2d = (Graphics2D) g;
+
+        Graphics2D bufferGraphics = offScreenBuffer.createGraphics();
+        bufferGraphics.setColor(Color.WHITE);
+        bufferGraphics.fillRect(0, 0, getWidth(), getHeight());
+
+        bufferGraphics.drawImage(bitmapLayer, 0, 0, null);
+
+        bufferGraphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        for (ArrayList<DrawingObject> stroke : undoStack) {
+            for (DrawingObject obj : stroke) {
+                obj.draw(bufferGraphics);
+            }
+        }
+        if (currentStroke != null) {
+            for (DrawingObject obj : currentStroke) {
+                obj.draw(bufferGraphics);
+            }
+        }
+        bufferGraphics.dispose();
+
+        g2d.drawImage(offScreenBuffer, 0, 0, this);
+
+        selectionTool.draw(g2d);
+        eraserTool.draw(g2d);
     }
 
     @Override
@@ -72,74 +135,47 @@ public class DrawingCanvas extends JPanel {
         return new Dimension(800, 600);
     }
 
-    public Color getCurrentColor() {
-        return currentColor;
+    public void undo() {
+        if (!undoStack.isEmpty()) {
+            ArrayList<DrawingObject> lastStroke = undoStack.remove(undoStack.size() - 1);
+            redoStack.add(lastStroke);
+            repaint();
+        }
     }
 
-    // 외부에서 펜 색상을 변경하는 메서드
-    public void setCurrentColor(Color color) {
-        this.currentColor = color;
+    public void redo() {
+        if (!redoStack.isEmpty()) {
+            ArrayList<DrawingObject> lastUndone = redoStack.remove(redoStack.size() - 1);
+            undoStack.add(lastUndone);
+            repaint();
+        }
     }
 
-    // 외부에서 지우개 모드를 설정하는 메서드
-    public void setEraserMode(boolean isEraserMode) {
-        this.isEraserMode = isEraserMode;
+    public void setToolMode(ToolMode mode) {
+        this.currentMode = mode;
+        repaint();
     }
 
-    // 캔버스 이미지를 반환하는 메서드 (저장 기능에 사용)
-    public BufferedImage getCanvasImage() {
-        return canvasImage;
+    public ArrayList<ArrayList<DrawingObject>> getStrokes() {
+        return undoStack;
     }
 
-    // 펜 설정을 위한 함수들
-    public void setPenColor(Color color) {
-        this.currentColor = color;
-    }
+    public boolean isSelectMode() { return currentMode == ToolMode.SELECT; }
+    public boolean isEraserMode() { return currentMode == ToolMode.ERASER; }
 
-    public void setPenStrokeWidth(int width) {
-        this.penStrokeWidth = width;
-    }
-
-    public void setPenOpacity(int opacity) {
-        this.penOpacity = opacity;
-    }
-
+    public Color getPenColor() { return penColor; }
+    public void setPenColor(Color color) { this.penColor = color; }
+    public int getPenStrokeWidth() { return penStrokeWidth; }
+    public void setPenStrokeWidth(int width) { this.penStrokeWidth = width; }
+    public int getPenOpacity() { return penOpacity; }
+    public void setPenOpacity(int opacity) { this.penOpacity = opacity; }
     public void setPenStrokeShape(int shapeCap, int shapeJoin) {
         this.penStrokeCap = shapeCap;
         this.penStrokeJoin = shapeJoin;
     }
 
-    // 지우개 설정을 위한 함수들
-    public void setEraserStrokeWidth(int width) {
-        this.eraserStrokeWidth = width;
-    }
-
-    public void setEraserOpacity(int opacity) {
-        this.eraserOpacity = opacity;
-    }
-
-    public void setEraserStrokeShape(int shapeCap, int shapeJoin) {
-        this.eraserStrokeCap = shapeCap;
-        this.eraserStrokeJoin = shapeJoin;
-    }
-
-    // 도구 모드 설정 함수
-    public void setToolMode(boolean isEraser) {
-        this.isEraserMode = isEraser;
-    }
-
-
-    public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            JFrame frame = new JFrame("그림판");
-            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-
-            DrawingCanvas canvas = new DrawingCanvas();
-            frame.add(canvas);
-
-            frame.pack();
-            frame.setLocationRelativeTo(null);
-            frame.setVisible(true);
-        });
-    }
+    public EraserTool getEraserTool() { return eraserTool; }
+    public SelectionTool getSelectionTool() { return selectionTool; }
+    public void setEraserWidth(int width) { eraserTool.setEraserWidth(width); }
+    public Graphics2D getBitmapLayerGraphics() { return bitmapLayer.createGraphics(); }
 }
